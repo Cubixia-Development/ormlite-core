@@ -388,15 +388,21 @@ public class TableUtils {
 						DatabaseConnection.DEFAULT_RESULT_FLAGS, false);
 				rowC = compiledStmt.runExecute();
 				logger.info("executed {} table statement changed {} rows: {}", label, rowC, statement);
-			} catch (SQLException e) {
-				if (ignoreErrors) {
-					logger.info("ignoring {} error '{}' for statement: {}", label, e, statement);
-				} else {
-					throw new SQLException("SQL statement failed: " + statement, e);
-				}
-			} finally {
-				IOUtils.closeThrowSqlException(compiledStmt, "compiled statement");
-			}
+            } catch (SQLException e) {
+                String stmtTrim = statement == null ? "" : statement.trim();
+                String errMsg = e.getMessage();
+                boolean isCreateSequence = stmtTrim.regionMatches(true, 0, "CREATE SEQUENCE", 0, 15);
+                boolean isAlreadyExists = errMsg != null && errMsg.toLowerCase().contains("already exists");
+                if ((isCreateSequence && isAlreadyExists)) {
+                    logger.info("ignoring {} error '{}' for statement: {}", label, e, statement);
+                } else if (ignoreErrors) {
+                    logger.info("ignoring {} error '{}' for statement: {}", label, e, statement);
+                } else {
+                    throw new SQLException("SQL statement failed: " + statement, e);
+                }
+            } finally {
+                IOUtils.closeThrowSqlException(compiledStmt, "compiled statement");
+            }
 			// sanity check
 			if (rowC < 0) {
 				if (!returnsNegative) {

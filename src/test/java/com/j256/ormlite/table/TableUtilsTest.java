@@ -472,6 +472,60 @@ public class TableUtilsTest extends BaseCoreTest {
 	}
 
 	@Test
+	public void testIgnoreCreateSequenceAlreadyExists() throws Exception {
+		DatabaseType databaseType = new H2DatabaseType() {
+			@Override
+			public void appendColumnArg(String tableName, StringBuilder sb, FieldType fieldType,
+					List<String> additionalArgs, List<String> statementsBefore, List<String> statementsAfter,
+					List<String> queriesAfter) throws SQLException {
+				super.appendColumnArg(tableName, sb, fieldType, additionalArgs, statementsBefore, statementsAfter,
+						queriesAfter);
+				if (fieldType.getColumnName().equals(LocalFoo.ID_FIELD_NAME)) {
+					statementsBefore.add("CREATE SEQUENCE interact_id_seq");
+				}
+			}
+		};
+		final ConnectionSource connectionSource = createMock(ConnectionSource.class);
+		expect(connectionSource.getDatabaseType()).andReturn(databaseType).anyTimes();
+		DatabaseConnection conn = createMock(DatabaseConnection.class);
+		expect(connectionSource.getReadWriteConnection("localfoo")).andReturn(conn);
+		final CompiledStatement stmt = createMock(CompiledStatement.class);
+		expect(conn.compileStatement(isA(String.class), isA(StatementType.class), isA(FieldType[].class), anyInt(),
+				anyBoolean())).andAnswer(new IAnswer<CompiledStatement>() {
+			private int stmtC = 0;
+			@Override
+			public CompiledStatement answer() {
+				Object[] args = EasyMock.getCurrentArguments();
+				String statement = (String) args[0];
+				if (stmtC == 0) {
+					assertTrue(statement.startsWith("CREATE SEQUENCE"));
+				}
+				stmtC++;
+				return stmt;
+			}
+		}).anyTimes();
+		expect(stmt.runExecute()).andAnswer(new IAnswer<Integer>() {
+			private int execC = 0;
+			@Override
+			public Integer answer() throws Throwable {
+				if (execC == 0) {
+					execC++;
+					throw new SQLException("ERROR: relation \"interact_id_seq\" already exists");
+				}
+				execC++;
+				return 0;
+			}
+		}).anyTimes();
+		connectionSource.releaseConnection(conn);
+		expectLastCall().anyTimes();
+		stmt.close();
+		expectLastCall().anyTimes();
+		replay(connectionSource, conn, stmt);
+		TableUtils.createTable(connectionSource, LocalFoo.class);
+		verify(connectionSource, conn, stmt);
+	}
+
+	@Test
 	public void testColumnDefinition() throws Exception {
 		List<String> statements = TableUtils.getCreateTableStatements(connectionSource, ColumnDefinition.class);
 		assertEquals(1, statements.size());
